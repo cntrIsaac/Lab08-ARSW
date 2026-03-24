@@ -18,6 +18,8 @@ override.tf.json
 *.tfvars.json
 !env/dev.tfvars        # Mantener solo el ejemplo no sensible
 !env/prod.tfvars.example
+!infra/env/dev.tfvars
+!infra/env/prod.tfvars.example
 
 # Archivos de backend locales
 backend.hcl
