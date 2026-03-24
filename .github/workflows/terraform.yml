@@ -1,0 +1,130 @@
+name: Terraform CI/CD
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - "modules/**"
+      - ".github/workflows/terraform.yml"
+  push:
+    branches:
+      - "main"
+    paths:
+      - "infra/**"
+      - "modules/**"
+      - ".github/workflows/terraform.yml"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action to run"
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+        default: plan
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+env:
+  TF_IN_AUTOMATION: true
+  TF_WORKING_DIR: infra
+  TF_VAR_FILE: env/dev.tfvars
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'plan')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build backend.hcl from secrets
+        run: |
+          cat > backend.hcl <<EOF
+          resource_group_name  = "${{ secrets.TFSTATE_RESOURCE_GROUP }}"
+          storage_account_name = "${{ secrets.TFSTATE_STORAGE_ACCOUNT }}"
+          container_name       = "${{ secrets.TFSTATE_CONTAINER }}"
+          key                  = "${{ secrets.TFSTATE_KEY }}"
+          EOF
+
+      - name: Terraform Init
+        run: terraform init -reconfigure -backend-config="backend.hcl"
+
+      - name: Terraform Fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        run: terraform plan -var-file="${{ env.TF_VAR_FILE }}" -out="tfplan"
+
+      - name: Show Plan Summary
+        run: terraform show -no-color tfplan > plan.txt
+
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: |
+            infra/tfplan
+            infra/plan.txt
+
+  apply:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build backend.hcl from secrets
+        run: |
+          cat > backend.hcl <<EOF
+          resource_group_name  = "${{ secrets.TFSTATE_RESOURCE_GROUP }}"
+          storage_account_name = "${{ secrets.TFSTATE_STORAGE_ACCOUNT }}"
+          container_name       = "${{ secrets.TFSTATE_CONTAINER }}"
+          key                  = "${{ secrets.TFSTATE_KEY }}"
+          EOF
+
+      - name: Terraform Init
+        run: terraform init -reconfigure -backend-config="backend.hcl"
+
+      - name: Terraform Plan
+        run: terraform plan -var-file="${{ env.TF_VAR_FILE }}" -out="tfplan"
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve "tfplan"
