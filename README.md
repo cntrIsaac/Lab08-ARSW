@@ -103,7 +103,7 @@ Evidencia de balanceo (muestras):
 *Captura mostrando respuesta HTTP del Load Balancer dirigido a VM lab8-vm-1 tras presionar F5 (refresh). El cambio de respuesta a "Hola desde lab8-vm-1" evidencia el balanceo de carga funcionando correctamente, distribuyendo requests entre ambas VMs.*
 
 ## CI/CD Implementado
-Archivo: .github/workflows/terraform.yml
+Archivo: .github/workflows/terraform.ymlgi
 
 Triggers activos:
 - pull_request
@@ -180,7 +180,30 @@ Roles asignados al SP:
 - .github/workflows/terraform.yml
 - .gitignore
 
-## Pendiente De Cierre
-- Adjuntar capturas para entrega en Teams (workflow, outputs, balanceo).
-- Ejecutar limpieza al finalizar:
-  terraform destroy -var-file="env/dev.tfvars"
+## Reflexion Tecnica (Cierre)
+Este laboratorio se disenio priorizando reproducibilidad, trazabilidad y seguridad operativa. La decision principal fue usar Terraform modular (vnet, compute, lb) y backend remoto en Azure Storage para evitar estados locales inconsistentes. Esto facilito trabajo colaborativo, ejecuciones repetibles y recuperacion ante fallos, a costa de una configuracion inicial mas estricta (storage dedicado, permisos y validaciones del backend).
+
+En CI/CD, se eligio autenticacion OIDC con GitHub Actions en lugar de secretos permanentes. El trade-off fue mayor complejidad de arranque (App Registration, federated credentials y RBAC por scope), pero se redujo riesgo de fuga de credenciales y se mejoro la postura de seguridad del proyecto. Tambien se separo el comportamiento local y CI: local usa `backend.hcl` + `az login`; CI arma `backend.hcl` desde secretos en runtime. Esto agrega pasos de mantenimiento, pero hace el flujo mas robusto y portable.
+
+Sobre arquitectura, usar 2 VMs detras de un Load Balancer dio una evidencia clara de alta disponibilidad basica y distribucion de trafico, validada por respuestas alternadas entre `lab8-vm-0` y `lab8-vm-1`. Como trade-off, esta solucion cuesta mas que una VM unica y requiere monitoreo adicional. Para endurecer la operacion se agregaron 3 retos: Bastion (acceso administrativo sin exponer SSH publico), alerta de disponibilidad del LB y budget mensual. Esto mejora operabilidad y control financiero, aunque incrementa el numero de recursos a administrar.
+
+Costos aproximados (orden de magnitud, pueden variar por region, SKU y tiempo encendido):
+- 2 VMs Linux de entrada: ~USD 10-30 cada una/mes (sin contar discos y egreso)
+- Load Balancer estandar + IP publica: ~USD 15-25/mes segun reglas y trafico
+- Bastion: normalmente el componente mas costoso de este escenario, aprox. ~USD 100+/mes
+- Monitor + alertas + logs: bajo a moderado al inicio, crece con retencion y volumen
+- Storage de state: costo bajo (centavos a pocos USD/mes)
+
+En conjunto, el entorno puede rondar desde ~USD 140/mes en adelante con Bastion activo de forma continua. Si se apaga o elimina Bastion cuando no se usa, el costo total baja de forma importante.
+
+Como destruir de forma segura:
+1. Verificar que nadie este ejecutando pipelines/apply en paralelo.
+2. Confirmar suscripcion y contexto correctos (`az account show`).
+3. Revisar plan de destruccion antes de ejecutar:
+  `terraform plan -destroy -var-file="env/dev.tfvars"`
+4. Ejecutar destruccion controlada:
+  `terraform destroy -var-file="env/dev.tfvars"`
+5. Validar en Azure que no queden recursos en `lab8-rg`.
+6. Conservar el backend de state (`rg-tfstate-lab8`) solo si se reutilizara; si no, eliminarlo al final para evitar costos residuales.
+
+Leccion final: IaC no solo consiste en aprovisionar recursos; el verdadero valor esta en gobernar todo el ciclo de vida (planificar, aplicar, monitorear, costear y destruir) de forma segura y repetible.
