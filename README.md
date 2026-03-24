@@ -1,326 +1,143 @@
-# Lab #8 — Infraestructura como Código con Terraform (Azure)
-**Curso:** BluePrints / ARSW  
-**Duración estimada:** 2–3 horas (base) + 1–2 horas (retos)  
-**Última actualización:** 2025-11-09
-
-## Propósito
-Modernizar el laboratorio de balanceo de carga en Azure usando **Terraform** para definir, aprovisionar y versionar la infraestructura. El objetivo es que los estudiantes diseñen y desplieguen una arquitectura reproducible, segura y con buenas prácticas de _IaC_.
-
-## Objetivos de aprendizaje
-1. Modelar infraestructura de Azure con Terraform (providers, state, módulos y variables).
-2. Desplegar una arquitectura de **alta disponibilidad** con **Load Balancer** (L4) y 2+ VMs Linux.
-3. Endurecer mínimamente la seguridad: **NSG**, **SSH por clave**, **tags**, _naming conventions_.
-4. Integrar **backend remoto** para el _state_ en Azure Storage con _state locking_.
-5. Automatizar _plan_/**apply** desde **GitHub Actions** con autenticación OIDC (sin secretos largos).
-6. Validar operación (health probe, página de prueba), observar costos y destruir con seguridad.
-
-> **Nota:** Este lab reemplaza la versión clásica basada en acciones manuales. Enfócate en _IaC_ y _pipelines_.
-
----
-
-## Arquitectura objetivo
-- **Resource Group** (p. ej. `rg-lab8-<alias>`)
-- **Virtual Network** con 2 subredes:
-  - `subnet-web`: VMs detrás de **Azure Load Balancer (público)**
-  - `subnet-mgmt`: Bastion o salto (opcional)
-- **Network Security Group**: solo permite **80/TCP** (HTTP) desde Internet al LB y **22/TCP** (SSH) solo desde tu IP pública.
-- **Load Balancer** público:
-  - Frontend IP pública
-  - Backend pool con 2+ VMs
-  - **Health probe** (TCP/80 o HTTP)
-  - **Load balancing rule** (80 → 80)
-- **2+ VMs Linux** (Ubuntu LTS) con cloud-init/Custom Script Extension para instalar **nginx** y servir una página con el **hostname**.
-- **Azure Storage Account + Container** para Terraform **remote state** (con bloqueo).
-- **Etiquetas (tags)**: `owner`, `course`, `env`, `expires`.
-
-> **Opcional** (retos): usar **VM Scale Set**, o reemplazar LB por **Application Gateway** (L7).
-
----
-
-## Requisitos previos
-- Cuenta/Subscription en Azure (Azure for Students o equivalente).
-- **Azure CLI** (`az`) y **Terraform >= 1.6** instalados en tu equipo.
-- **SSH key** generada (ej. `ssh-keygen -t ed25519`).
-- Cuenta en **GitHub** para ejecutar el pipeline de Actions.
-
----
-
-## Estructura del repositorio (sugerida)
-```
-.
-├─ infra/
-│  ├─ main.tf
-│  ├─ providers.tf
-│  ├─ variables.tf
-│  ├─ outputs.tf
-│  ├─ backend.hcl.example
-│  ├─ cloud-init.yaml
-│  └─ env/
-│     ├─ dev.tfvars
-│     └─ prod.tfvars (opcional)
-├─ modules/
-│  ├─ vnet/
-│  │  ├─ main.tf
-│  │  ├─ variables.tf
-│  │  └─ outputs.tf
-│  ├─ compute/
-│  │  ├─ main.tf
-│  │  ├─ variables.tf
-│  │  └─ outputs.tf
-│  └─ lb/
-│     ├─ main.tf
-│     ├─ variables.tf
-│     └─ outputs.tf
-└─ .github/workflows/terraform.yml
-```
-
----
-
-## Bootstrap del backend remoto
-Primero crea el **Resource Group**, **Storage Account** y **Container** para el _state_:
-
-```bash
-# Nombres únicos
-SUFFIX=$RANDOM
-LOCATION=eastus
-RG=rg-tfstate-lab8
-STO=sttfstate${SUFFIX}
-CONTAINER=tfstate
-
-az group create -n $RG -l $LOCATION
-az storage account create -g $RG -n $STO -l $LOCATION --sku Standard_LRS --encryption-services blob
-az storage container create --name $CONTAINER --account-name $STO
-```
-
-Completa `infra/backend.hcl.example` con los valores creados y renómbralo a `backend.hcl`.
-
----
-
-## Variables principales (ejemplo)
-En `infra/variables.tf` define:
-- `prefix`, `location`, `vm_count`, `admin_username`, `ssh_public_key`
-- `allow_ssh_from_cidr` (tu IPv4 en /32)
-- `tags` (map)
-
-En `infra/env/dev.tfvars`:
-```hcl
-prefix        = "lab8"
-location      = "eastus"
-vm_count      = 2
-admin_username= "student"
-ssh_public_key= "~/.ssh/id_ed25519.pub"
-allow_ssh_from_cidr = "X.X.X.X/32" # TU IP
-tags = { owner = "tu-alias", course = "ARSW/BluePrints", env = "dev", expires = "2025-12-31" }
-```
-
----
-
-## cloud-init de las VMs
-Archivo `infra/cloud-init.yaml` (instala nginx y muestra el hostname):
-```yaml
-#cloud-config
-package_update: true
-packages:
-  - nginx
-runcmd:
-  - echo "Hola desde $(hostname)" > /var/www/html/index.nginx-debian.html
-  - systemctl enable nginx
-  - systemctl restart nginx
-```
-
----
-
-## Flujo de trabajo local
-```bash
-cd infra
-
-# Autenticación en Azure
-az login
-az account show # verifica la suscripción activa
-
-# Inicializa Terraform con backend remoto
-terraform init -backend-config=backend.hcl
-
-# Revisión rápida
-terraform fmt -recursive
-terraform validate
-
-# Plan con variables de dev
-terraform plan -var-file=env/dev.tfvars -out plan.tfplan
-
-# Apply
-terraform apply "plan.tfplan"
-
-# Verifica el LB público (cambia por tu IP)
-curl http://$(terraform output -raw lb_public_ip)
-```
-
-**Outputs esperados** (ejemplo):
-- `lb_public_ip`
-- `resource_group_name`
-- `vm_names`
-
----
-
-## Bitácora de ejecución 
-
-Esta sección registra los comandos usados en este laboratorio y qué muestra cada uno.
-
-1. Cambiar a la carpeta del proyecto
-
-```powershell
-cd "...\Lab08-ARSW\infra"
-```
-
-Qué muestra:
-- Cambia el contexto de ejecución a la carpeta `infra`, donde están los archivos raíz de Terraform.
-
-2. Inicializar backend remoto
-
-```powershell
-terraform init -reconfigure -backend-config="backend.hcl"
-```
-
-Qué muestra:
-- Inicialización del backend `azurerm`.
-- Descarga/reutilización de providers.
-- Mensaje `Terraform has been successfully initialized!` cuando queda correcto.
-
-3. Validar configuración
-
-```powershell
-terraform validate
-```
-
-Qué muestra:
-- Revisión de sintaxis y wiring de módulos/variables.
-- Mensaje `Success! The configuration is valid.` cuando no hay errores.
-
-4. Ver plan
-
-```powershell
-terraform plan -var-file="env/dev.tfvars"
-```
-
-Qué muestra:
-- Vista previa de cambios de infraestructura.
-- Resumen tipo `Plan: X to add, Y to change, Z to destroy`.
-
-5. Guardar plan en archivo
-
-```powershell
-terraform plan -var-file="env/dev.tfvars" -out="tfplan"
-```
-
-Qué muestra:
-- El mismo plan, pero lo guarda en un binario llamado `tfplan` para aplicar exactamente esos cambios.
-
-6. Aplicar exactamente ese plan guardado
-
-```powershell
-terraform apply "tfplan"
-```
-
-Qué muestra:
-- Creación real de recursos en Azure según el plan guardado.
-- Resumen final con recursos creados/modificados/destruidos.
-
-7. Ver salidas
-
-```powershell
-terraform output
-```
-
-Qué muestra:
-- Outputs definidos en `infra/outputs.tf`, por ejemplo IP pública del LB, nombre del RG y nombres de VMs.
-
-8. (Opcional) Ver salida específica en texto plano
-
-```powershell
-terraform output -raw "lb_public_ip"
-```
-
-Qué muestra:
-- Solo el valor de la IP pública del Load Balancer en formato plano.
-
-9. (Opcional, al final del laboratorio) Destruir todo
-
-```powershell
-terraform destroy -var-file="env/dev.tfvars"
-```
-
-Qué muestra:
-- Plan de destrucción y luego eliminación de recursos para evitar costos.
-
-Estado actual del avance:
-- Backend remoto configurado y funcional.
-- `terraform init`, `terraform validate`, `terraform plan` y `terraform apply "tfplan"` ejecutados con éxito.
-- Validación funcional completada: respuesta HTTP del LB confirmada (`Hola desde lab8-vm-0` y `Hola desde lab8-vm-1`).
-- Pendiente: pipeline CI/CD con OIDC, entregables/documentación final y `destroy` al cierre.
-
-Evidencia rápida de balanceo (múltiples requests):
-- `req1: Hola desde lab8-vm-1`
-- `req2: Hola desde lab8-vm-0`
-- `req3: Hola desde lab8-vm-1`
-- `req4: Hola desde lab8-vm-0`
-
----
-
-## GitHub Actions (CI/CD con OIDC)
-El _workflow_ `.github/workflows/terraform.yml`:
-- Ejecuta `fmt`, `validate` y `plan` en cada PR.
-- Publica el plan como artefacto/comentario.
-- Job manual `apply` con _workflow_dispatch_ y aprobación.
-
-**Configura OIDC** en Azure (federación con tu repositorio) y asigna el rol **Contributor** al _principal_ del _workflow_ sobre el RG del lab.
-
----
-
-## Entregables en TEAMS
-1. **Repositorio GitHub** del equipo con:
-   - Código Terraform (módulos) y `cloud-init.yaml`.
-   - `backend.hcl` **(sin secretos)** y `env/dev.tfvars` (sin llaves privadas).
-   - Workflow de GitHub Actions y evidencias del `plan`.
-2. **Diagrama** (componente y secuencia) del caso de estudio propuesto.
-3. **URL/IP pública** del Load Balancer + **captura** mostrando respuesta de **2 VMs** (p. ej. refrescar y ver hostnames cambiar).
-4. **Reflexión técnica** (1 página máx.): decisiones, trade‑offs, costos aproximados y cómo destruir seguro.
-5. **Limpieza**: confirmar `terraform destroy` al finalizar.
-
----
-
-## Rúbrica (100 pts)
-- **Infra desplegada y funcional (40 pts):** LB, 2+ VMs, health probe, NSG correcto.
-- **Buenas prácticas Terraform (20 pts):** módulos, variables, `fmt/validate`, _remote state_.
-- **Seguridad y costos (15 pts):** SSH por clave, NSG mínimo, tags y _naming_; estimación de costos.
-- **CI/CD (15 pts):** pipeline con `plan` automático y `apply` manual (OIDC).
-- **Documentación y diagramas (10 pts):** README del equipo, diagramas claros y reflexión.
-
----
-
-## Retos (elige 2+)
-- Migrar a **VM Scale Set** con _Custom Script Extension_ o **cloud-init**.
-- Reemplazar LB por **Application Gateway** con _probe_ HTTP y _path-based routing_ (si exponen múltiples apps).
-- **Azure Bastion** para acceso SSH sin IP pública en VMs.
-- **Alertas** de Azure Monitor (p. ej. estado del probe) y **Budget alert**.
-- **Módulos privados** versionados con _semantic versioning_.
-
----
-
-## Limpieza
-```bash
-terraform destroy -var-file="env/dev.tfvars"
-```
-
-> **Tip:** Mantén los recursos etiquetados con `expires` y **elimina** todo al terminar.
-
----
-
-## Preguntas de reflexión
-- ¿Por qué L4 LB vs Application Gateway (L7) en tu caso? ¿Qué cambiaría?
-- ¿Qué implicaciones de seguridad tiene exponer 22/TCP? ¿Cómo mitigarlas?
-- ¿Qué mejoras harías si esto fuera **producción**? (resiliencia, autoscaling, observabilidad).
-
----
-
-## Créditos y material de referencia
-- Azure, Terraform, IaC, LB y VMSS (docs oficiales) — revisa enlaces en clase.
+﻿# Evidencia De Desarrollo - Lab 8 Terraform En Azure
+
+## Resumen
+En este laboratorio desplegamos infraestructura en Azure con Terraform de extremo a extremo: backend remoto para el state, red, NSG, load balancer y dos VMs Linux. También configuramos CI/CD con GitHub Actions y autenticación OIDC (sin secretos de larga duración), incluyendo triggers para PR, push a main y ejecución manual.
+
+Lo más valioso que aprendimos fue a trabajar IaC de forma real, no solo “crear recursos”: validar, automatizar, versionar y resolver errores de integración entre local y CI. Validamos funcionalmente el resultado porque el LB respondió desde ambas VMs (lab8-vm-0 y lab8-vm-1).
+
+Durante el proceso superamos varias dificultades importantes: providers no registrados en Azure, errores de rutas/comillas en PowerShell, duplicados en módulos Terraform, problemas de formato en CI, archivo dev.tfvars no versionado y uso de ruta local de llave SSH en runners de GitHub. Cada bloqueo se resolvió con ajustes concretos en Terraform, .gitignore y workflow.
+
+### Resultado final:
+Infraestructura operativa, pipeline estable, OIDC configurado con permisos correctos y limpieza ejecutada con terraform destroy.
+
+
+## Estado Final
+- Backend remoto de Terraform operativo en Azure Storage.
+- Infraestructura desplegada correctamente en Azure.
+- Balanceador de carga funcionando con dos VMs.
+- Pipeline de GitHub Actions funcionando con OIDC (sin client secret).
+- Errores de CI corregidos y validados.
+
+## Infraestructura Desplegada
+- Resource Group: lab8-rg
+- VNet: lab8-vnet
+- Subnets: subnet-web, subnet-mgmt
+- NSG: lab8-web-nsg
+- Load Balancer: lab8-lb
+- Public IP LB: 20.127.36.211
+- VMs: lab8-vm-0, lab8-vm-1
+
+## Backend Remoto (State)
+- Resource Group: rg-tfstate-lab8
+- Storage Account: sttfstate1328747843
+- Container: tfstate
+- Key: lab08-dev.tfstate
+
+## Comandos Ejecutados (Flujo Real)
+1. cd "...\Lab08-ARSW\infra"
+2. terraform init -reconfigure -backend-config="backend.hcl"
+3. terraform validate
+4. terraform plan -var-file="env/dev.tfvars"
+5. terraform plan -var-file="env/dev.tfvars" -out="tfplan"
+6. terraform apply "tfplan"
+7. terraform output
+8. terraform output -raw "lb_public_ip"
+
+## Evidencia Funcional
+Outputs observados:
+- lb_public_ip = 20.127.36.211
+- resource_group_name = lab8-rg
+- vm_names = [lab8-vm-0, lab8-vm-1]
+
+Prueba HTTP al LB:
+- Hola desde lab8-vm-0
+- Hola desde lab8-vm-1
+
+Evidencia de balanceo (muestras):
+- req1: Hola desde lab8-vm-1
+- req2: Hola desde lab8-vm-0
+- req3: Hola desde lab8-vm-1
+- req4: Hola desde lab8-vm-0
+
+## CI/CD Implementado
+Archivo: .github/workflows/terraform.yml
+
+Triggers activos:
+- pull_request
+- push a main
+- workflow_dispatch (plan/apply)
+
+Jobs implementados:
+- plan: init, fmt -check, validate, plan, artefacto
+- apply: init, plan, apply manual por workflow_dispatch
+
+Autenticacion:
+- azure/login@v2 con OIDC
+
+## OIDC En Azure (Evidencia)
+App Registration:
+- Display Name: gh-lab8-terraform
+- AZURE_CLIENT_ID: 5d87c7cb-d55e-444f-bbd6-8cb77737b0ab
+
+Service Principal:
+- Object ID: 70b8984f-2496-4c2e-85e4-be8cfa30b24f
+
+Federated credentials:
+- repo:cntrIsaac/Lab08-ARSW:ref:refs/heads/main
+- repo:cntrIsaac/Lab08-ARSW:pull_request
+
+Roles asignados al SP:
+- Contributor en /resourceGroups/lab8-rg
+- Contributor en /resourceGroups/rg-tfstate-lab8
+
+## Secrets Configurados En GitHub
+- AZURE_CLIENT_ID
+- AZURE_TENANT_ID
+- AZURE_SUBSCRIPTION_ID
+- TFSTATE_RESOURCE_GROUP
+- TFSTATE_STORAGE_ACCOUNT
+- TFSTATE_CONTAINER
+- TFSTATE_KEY
+
+## Incidencias Y Correcciones
+1) SubscriptionNotFound al crear Storage
+- Causa: Microsoft.Storage no registrado
+- Solucion: az provider register --namespace Microsoft.Storage --wait
+
+2) Error en init por argumentos/comillas
+- Causa: invocacion en PowerShell sin formato consistente
+- Solucion: terraform init -reconfigure -backend-config="backend.hcl"
+
+3) Duplicados en modulos Terraform
+- Causa: variables/outputs repetidos en lb y vnet
+- Solucion: limpieza de duplicados en modulos
+
+4) Error de backend.hcl multilinea en Actions
+- Causa: salto de linea en secrets
+- Solucion: sanitizacion CR/LF al construir backend.hcl en workflow
+
+5) Error de var-file no encontrado en Actions
+- Causa: infra/env/dev.tfvars ignorado por .gitignore
+- Solucion: excepcion explicita en .gitignore para versionar infra/env/dev.tfvars
+
+6) Error de llave SSH en Actions
+- Causa: uso de ruta local ~/.ssh/id_ed25519.pub en runner
+- Solucion: usar valor literal de llave publica en dev.tfvars y pasar var.ssh_public_key sin file()
+
+7) Error de fmt en CI
+- Causa: formato de env/dev.tfvars
+- Solucion: terraform fmt -recursive y commit del archivo formateado
+
+## Cambios De Codigo Relevantes
+- infra/providers.tf
+- modules/lb/main.tf
+- modules/vnet/main.tf
+- infra/main.tf
+- infra/env/dev.tfvars
+- .github/workflows/terraform.yml
+- .gitignore
+
+## Pendiente De Cierre
+- Adjuntar capturas para entrega en Teams (workflow, outputs, balanceo).
+- Ejecutar limpieza al finalizar:
+  terraform destroy -var-file="env/dev.tfvars"
