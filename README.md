@@ -162,6 +162,110 @@ curl http://$(terraform output -raw lb_public_ip)
 
 ---
 
+## Bitácora de ejecución 
+
+Esta sección registra los comandos usados en este laboratorio y qué muestra cada uno.
+
+1. Cambiar a la carpeta del proyecto
+
+```powershell
+cd "C:\Users\isaac\OneDrive\Universidad\ARSW\Laboratorios\Laboratorio8\Lab08-ARSW\infra"
+```
+
+Qué muestra:
+- Cambia el contexto de ejecución a la carpeta `infra`, donde están los archivos raíz de Terraform.
+
+2. Inicializar backend remoto
+
+```powershell
+terraform init -reconfigure -backend-config="backend.hcl"
+```
+
+Qué muestra:
+- Inicialización del backend `azurerm`.
+- Descarga/reutilización de providers.
+- Mensaje `Terraform has been successfully initialized!` cuando queda correcto.
+
+3. Validar configuración
+
+```powershell
+terraform validate
+```
+
+Qué muestra:
+- Revisión de sintaxis y wiring de módulos/variables.
+- Mensaje `Success! The configuration is valid.` cuando no hay errores.
+
+4. Ver plan
+
+```powershell
+terraform plan -var-file="env/dev.tfvars"
+```
+
+Qué muestra:
+- Vista previa de cambios de infraestructura.
+- Resumen tipo `Plan: X to add, Y to change, Z to destroy`.
+
+5. Guardar plan en archivo
+
+```powershell
+terraform plan -var-file="env/dev.tfvars" -out="tfplan"
+```
+
+Qué muestra:
+- El mismo plan, pero lo guarda en un binario llamado `tfplan` para aplicar exactamente esos cambios.
+
+6. Aplicar exactamente ese plan guardado
+
+```powershell
+terraform apply "tfplan"
+```
+
+Qué muestra:
+- Creación real de recursos en Azure según el plan guardado.
+- Resumen final con recursos creados/modificados/destruidos.
+
+7. Ver salidas
+
+```powershell
+terraform output
+```
+
+Qué muestra:
+- Outputs definidos en `infra/outputs.tf`, por ejemplo IP pública del LB, nombre del RG y nombres de VMs.
+
+8. (Opcional) Ver salida específica en texto plano
+
+```powershell
+terraform output -raw "lb_public_ip"
+```
+
+Qué muestra:
+- Solo el valor de la IP pública del Load Balancer en formato plano.
+
+9. (Opcional, al final del laboratorio) Destruir todo
+
+```powershell
+terraform destroy -var-file="env/dev.tfvars"
+```
+
+Qué muestra:
+- Plan de destrucción y luego eliminación de recursos para evitar costos.
+
+Estado actual del avance:
+- Backend remoto configurado y funcional.
+- `terraform init`, `terraform validate`, `terraform plan` y `terraform apply "tfplan"` ejecutados con éxito.
+- Validación funcional completada: respuesta HTTP del LB confirmada (`Hola desde lab8-vm-0` y `Hola desde lab8-vm-1`).
+- Pendiente: pipeline CI/CD con OIDC, entregables/documentación final y `destroy` al cierre.
+
+Evidencia rápida de balanceo (múltiples requests):
+- `req1: Hola desde lab8-vm-1`
+- `req2: Hola desde lab8-vm-0`
+- `req3: Hola desde lab8-vm-1`
+- `req4: Hola desde lab8-vm-0`
+
+---
+
 ## GitHub Actions (CI/CD con OIDC)
 El _workflow_ `.github/workflows/terraform.yml`:
 - Ejecuta `fmt`, `validate` y `plan` en cada PR.
@@ -204,7 +308,7 @@ El _workflow_ `.github/workflows/terraform.yml`:
 
 ## Limpieza
 ```bash
-terraform destroy -var-file=env/dev.tfvars
+terraform destroy -var-file="env/dev.tfvars"
 ```
 
 > **Tip:** Mantén los recursos etiquetados con `expires` y **elimina** todo al terminar.
