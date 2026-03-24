@@ -18,6 +18,29 @@ Infraestructura operativa, pipeline estable, OIDC configurado con permisos corre
 - Pipeline de GitHub Actions funcionando con OIDC (sin client secret).
 - Errores de CI corregidos y validados.
 
+## Retos Implementados
+Se implementaron 3 retos adicionales sobre la base del laboratorio:
+
+1) Azure Bastion para acceso SSH sin IP publica en VMs
+- Subred dedicada `AzureBastionSubnet` agregada al modulo de red.
+- Recurso `azurerm_bastion_host` desplegado.
+- IP publica de Bastion creada y exportada en outputs.
+
+2) Alerta de Azure Monitor
+- Action Group con notificacion por correo (`alert_email`).
+- Metrica monitoreada: `DipAvailability` del Load Balancer.
+- Condicion: alerta cuando baja de 90% en ventana de 5 minutos.
+
+3) Budget alert mensual
+- Recurso `azurerm_consumption_budget_resource_group` en `lab8-rg`.
+- Umbral real al 80% y forecast al 100%.
+- Notificacion por correo configurada.
+
+Evidencia de outputs de los retos:
+- `bastion_host_name = lab8-bastion`
+- `bastion_public_ip = 172.174.90.169`
+- `monitor_action_group_id` creado correctamente
+
 ## Infraestructura Desplegada
 - Resource Group: lab8-rg
 - VNet: lab8-vnet
