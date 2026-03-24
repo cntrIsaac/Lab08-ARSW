@@ -56,6 +56,10 @@ Evidencia de outputs de los retos:
 - Container: tfstate
 - Key: lab08-dev.tfstate
 
+Nota importante:
+- En CI (GitHub Actions), el backend se construye con secrets del repositorio para generar `backend.hcl` en runtime.
+- En local, no se requieren esos secrets de GitHub: basta `backend.hcl` + `az login` con permisos sobre el storage del state.
+
 ## Comandos Ejecutados (Flujo Real)
 1. cd "...\Lab08-ARSW\infra"
 2. terraform init -reconfigure -backend-config="backend.hcl"
