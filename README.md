@@ -18,6 +18,10 @@ Infraestructura operativa, pipeline estable, OIDC configurado con permisos corre
 - Pipeline de GitHub Actions funcionando con OIDC (sin client secret).
 - Errores de CI corregidos y validados.
 
+## Diagramas De Caso De Estudio
+- **Diagrama de Componentes**: `DIAGRAMA_COMPONENTES.md` - Visualiza estructura de módulos Terraform, recursos Azure y flujo CI/CD.
+- **Diagrama de Secuencia**: `DIAGRAMA_SECUENCIA.md` - Detalla pasos de ejecución desde push/PR hasta provisionamiento en Azure.
+
 ## Retos Implementados
 Se implementaron 3 retos adicionales sobre la base del laboratorio:
 
@@ -85,6 +89,18 @@ Evidencia de balanceo (muestras):
 - req2: Hola desde lab8-vm-0
 - req3: Hola desde lab8-vm-1
 - req4: Hola desde lab8-vm-0
+
+### Pruebas De Load Balancer - Capturas De Pantalla
+
+**IP del Load Balancer:** `20.85.235.255`
+
+#### Primer request - Respuesta desde VM0
+![Llamado hacia VM0](docs/pruebas/llamado_hacia_vm0.png)
+*Captura mostrando respuesta HTTP del Load Balancer dirigido a VM lab8-vm-0. Se observa el mensaje "Hola desde lab8-vm-0" confirmando que la VM está operativa y respondiendo a través del balanceador.*
+
+#### Segundo request (refresh) - Respuesta desde VM1
+![Llamado hacia VM1](docs/pruebas/llamado_hacia_vm1.png)
+*Captura mostrando respuesta HTTP del Load Balancer dirigido a VM lab8-vm-1 tras presionar F5 (refresh). El cambio de respuesta a "Hola desde lab8-vm-1" evidencia el balanceo de carga funcionando correctamente, distribuyendo requests entre ambas VMs.*
 
 ## CI/CD Implementado
 Archivo: .github/workflows/terraform.yml
