@@ -169,7 +169,7 @@ Esta sección registra los comandos usados en este laboratorio y qué muestra ca
 1. Cambiar a la carpeta del proyecto
 
 ```powershell
-cd "C:\Users\isaac\OneDrive\Universidad\ARSW\Laboratorios\Laboratorio8\Lab08-ARSW\infra"
+cd "...\Lab08-ARSW\infra"
 ```
 
 Qué muestra:
